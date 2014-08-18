@@ -2,6 +2,8 @@
  * haptic motor driver for max77803 - max77673_haptic.c
  *
  * Copyright (C) 2011 ByungChang Cha <bc.cha@samsung.com>
+ * Copyright (C) 2012 The CyanogenMod Project
+ *                    Daniel Hillenbrand <codeworkx@cyanogenmod.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -23,6 +25,13 @@
 #include <linux/mfd/max77803-private.h>
 
 #define TEST_MODE_TIME 10000
+
+#define PWM_DEFAULT 27787
+#define PWM_MAX 37050
+#define PWM_MIN 18525
+#define PWM_THRESHOLD 32419
+
+static int pwm_duty = PWM_DEFAULT; /* duty value, 37050=100%, 27787=50%, 18525=0% */
 
 struct max77803_haptic_data {
 	struct max77803_dev *max77803;
@@ -155,8 +164,7 @@ static void haptic_work(struct work_struct *work)
 
 		max77803_haptic_i2c(hap_data, true);
 
-		pwm_config(hap_data->pwm, hap_data->pdata->duty,
-			   hap_data->pdata->period);
+		pwm_config(hap_data->pwm, pwm_duty, hap_data->pdata->period);
 		pwm_enable(hap_data->pwm);
 
 		if (hap_data->pdata->motor_en)
@@ -196,14 +204,14 @@ void vibtonz_en(bool en)
 			return;
 
 		max77803_haptic_i2c(g_hap_data, true);
-		
+
 		//must set pwm after resume. this may be workaround..
 		if(g_hap_data->resumed)
 		{
 			pwm_config(g_hap_data->pwm, g_hap_data->pdata->period/2, g_hap_data->pdata->period);
 			g_hap_data->resumed = false;
 		}
-		
+
 		pwm_enable(g_hap_data->pwm);
 
 		if (g_hap_data->pdata->motor_en)
@@ -234,20 +242,12 @@ void vibtonz_pwm(int nForce)
 {
 	/* add to avoid the glitch issue */
 	static int prev_duty;
-	int pwm_period = 0, pwm_duty = 0;
+	int pwm_period = 0;
 
 	if (g_hap_data == NULL) {
-		printk(KERN_ERR "[VIB] the motor is not ready!!!");
+		pr_err("[VIB] %s: the motor is not ready!!!", __func__);
 		return ;
 	}
-
-	pwm_period = g_hap_data->pdata->period;
-	pwm_duty = pwm_period / 2 + ((pwm_period / 2 - 2) * nForce) / 127;
-
-	if (pwm_duty > g_hap_data->pdata->duty)
-		pwm_duty = g_hap_data->pdata->duty;
-	else if (pwm_period - pwm_duty > g_hap_data->pdata->duty)
-		pwm_duty = pwm_period - g_hap_data->pdata->duty;
 
 	/* add to avoid the glitch issue */
 	if (prev_duty != pwm_duty) {
@@ -257,6 +257,70 @@ void vibtonz_pwm(int nForce)
 }
 EXPORT_SYMBOL(vibtonz_pwm);
 #endif
+
+static ssize_t pwm_value_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", pwm_duty);
+}
+
+static ssize_t pwm_value_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	int input = 0;
+	if (kstrtoint(buf, 0, &input))
+		return -EINVAL;
+
+	/* make sure new pwm duty is in range */
+	if (input > 37050)
+		input = 37050;
+	else if (input < 18525)
+		input = 18525;
+
+	pwm_duty = input;
+
+	return size;
+}
+
+static ssize_t pwm_default_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_DEFAULT);
+}
+
+static ssize_t pwm_max_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_MAX);
+}
+
+static ssize_t pwm_min_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_MIN);
+}
+
+static ssize_t pwm_threshold_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_THRESHOLD);
+}
+
+static DEVICE_ATTR(pwm_value, S_IRUGO | S_IWUSR,
+		pwm_value_show, pwm_value_store);
+
+static DEVICE_ATTR(pwm_default, S_IRUGO,
+		pwm_default_show, NULL);
+
+static DEVICE_ATTR(pwm_max, S_IRUGO,
+		pwm_max_show, NULL);
+
+static DEVICE_ATTR(pwm_min, S_IRUGO,
+		pwm_min_show, NULL);
+
+static DEVICE_ATTR(pwm_threshold, S_IRUGO,
+		pwm_threshold_show, NULL);
 
 static int max77803_haptic_probe(struct platform_device *pdev)
 {
@@ -319,7 +383,7 @@ static int max77803_haptic_probe(struct platform_device *pdev)
 	hap_data->tout_dev.name = "vibrator";
 	hap_data->tout_dev.get_time = haptic_get_time;
 	hap_data->tout_dev.enable = haptic_enable;
-	
+
 	hap_data->resumed = false;
 
 #ifdef CONFIG_ANDROID_TIMED_OUTPUT
@@ -328,6 +392,28 @@ static int max77803_haptic_probe(struct platform_device *pdev)
 		pr_err("[VIB] Failed to register timed_output : %d\n", error);
 		error = -EFAULT;
 		goto err_timed_output_register;
+	}
+
+	/* User controllable pwm level */
+	error = device_create_file(hap_data->tout_dev.dev, &dev_attr_pwm_value);
+	if (error > 0) {
+		pr_err("[VIB] create sysfs fail: pwm_value\n");
+	}
+	error = device_create_file(hap_data->tout_dev.dev, &dev_attr_pwm_default);
+	if (error > 0) {
+		pr_err("[VIB] create sysfs fail: pwm_default\n");
+	}
+	error = device_create_file(hap_data->tout_dev.dev, &dev_attr_pwm_max);
+	if (error > 0) {
+		pr_err("[VIB] create sysfs fail: pwm_max\n");
+	}
+	error = device_create_file(hap_data->tout_dev.dev, &dev_attr_pwm_min);
+	if (error > 0) {
+		pr_err("[VIB] create sysfs fail: pwm_min\n");
+	}
+	error = device_create_file(hap_data->tout_dev.dev, &dev_attr_pwm_threshold);
+	if (error > 0) {
+		pr_err("[VIB] create sysfs fail: pwm_threshold\n");
 	}
 #endif
 

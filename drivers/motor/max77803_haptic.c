@@ -26,7 +26,12 @@
 
 #define TEST_MODE_TIME 10000
 
-static unsigned long pwm_val = 50; /* duty in percent */
+#define PWM_DEFAULT 50
+#define PWM_MAX 100
+#define PWM_MIN 0
+#define PWM_THRESHOLD 75
+
+static unsigned long pwm_val = PWM_DEFAULT; /* duty in percent */
 static int pwm_duty = 27787; /* duty value, 37050=100%, 27787=50%, 18525=0% */
 
 struct max77803_haptic_data {
@@ -260,24 +265,19 @@ EXPORT_SYMBOL(vibtonz_pwm);
 static ssize_t pwm_value_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	int count;
-
 	pwm_val = ((pwm_duty - 18525) * 100) / 18525;
-
-	count = sprintf(buf, "%lu\n", pwm_val);
 	pr_debug("[VIB] pwm_val: %lu\n", pwm_val);
-
-	return count;
+	return sprintf(buf, "%lu\n", pwm_val);
 }
 
-ssize_t pwm_value_store(struct device *dev,
+static ssize_t pwm_value_store(struct device *dev,
 		struct device_attribute *attr,
 		const char *buf, size_t size)
 {
 	if (kstrtoul(buf, 0, &pwm_val))
 		pr_err("[VIB] %s: error on storing pwm_val\n", __func__);
 
-	pr_info("[VIB] %s: pwm_val=%lu\n", __func__, pwm_val);
+	pr_debug("[VIB] %s: pwm_val=%lu\n", __func__, pwm_val);
 
 	pwm_duty = (pwm_val * 18525) / 100 + 18525;
 
@@ -287,13 +287,49 @@ ssize_t pwm_value_store(struct device *dev,
 	else if (pwm_duty < 18525)
 		pwm_duty = 18525;
 
-	pr_info("[VIB] %s: pwm_duty=%d\n", __func__, pwm_duty);
+	pr_debug("[VIB] %s: pwm_duty=%d\n", __func__, pwm_duty);
 
 	return size;
 }
 
+static ssize_t pwm_default_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_DEFAULT);
+}
+
+static ssize_t pwm_max_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_MAX);
+}
+
+static ssize_t pwm_min_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_MIN);
+}
+
+static ssize_t pwm_threshold_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", PWM_THRESHOLD);
+}
+
 static DEVICE_ATTR(pwm_value, S_IRUGO | S_IWUSR,
 		pwm_value_show, pwm_value_store);
+
+static DEVICE_ATTR(pwm_default, S_IRUGO,
+		pwm_default_show, NULL);
+
+static DEVICE_ATTR(pwm_max, S_IRUGO,
+		pwm_max_show, NULL);
+
+static DEVICE_ATTR(pwm_min, S_IRUGO,
+		pwm_min_show, NULL);
+
+static DEVICE_ATTR(pwm_threshold, S_IRUGO,
+		pwm_threshold_show, NULL);
 
 static int max77803_haptic_probe(struct platform_device *pdev)
 {

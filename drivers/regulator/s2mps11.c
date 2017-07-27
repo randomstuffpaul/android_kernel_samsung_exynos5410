@@ -587,7 +587,9 @@ static int s2mps11_set_voltage_sel(struct regulator_dev *rdev, unsigned selector
 }
 
 #ifdef MANUAL_RESET_CONTROL
+#ifdef CONFIG_SEC_DEBUG
 extern int get_sec_debug_level(void);
+#endif
 
 static int s2mps11_set_mrstb_en(struct s2mps11_info *s2mps11, int enable)
 {
@@ -897,6 +899,7 @@ static __devinit int s2mps11_pmic_probe(struct platform_device *pdev)
 	}
 
 #ifdef MANUAL_RESET_CONTROL
+#ifdef CONFIG_SEC_DEBUG
 	if(!get_sec_debug_level()) {
 		s2mps11->mrstb_enabled = 1;
 		s2mps11->mrstb_status = 1;
@@ -908,9 +911,12 @@ static __devinit int s2mps11_pmic_probe(struct platform_device *pdev)
 			goto err;
 		}
 	} else {
+#endif
 		s2mps11->mrstb_enabled = 0;
 		s2mps11->mrstb_status = 0;
+#ifdef CONFIG_SEC_DEBUG
 	}
+#endif
 #endif
 
 	return 0;
